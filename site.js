@@ -105,7 +105,7 @@ else if (cmd === 'deploy') {
 
   // Deploy via wrangler
   log(`🚀 Deploying ${dir}...`);
-  const env = { ...process.env, CF_API_TOKEN: TOKEN, CLOUDFLARE_ACCOUNT_ID: ACCOUNT };
+  const env = { ...process.env, CLOUDFLARE_API_TOKEN: TOKEN, CLOUDFLARE_ACCOUNT_ID: ACCOUNT };
   const result = execSync(
     `wrangler pages deploy "${dir}" --project-name "${projectName}" --branch main 2>&1`,
     { env }
