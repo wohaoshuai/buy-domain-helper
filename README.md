@@ -1,172 +1,191 @@
 <!--skill-metadata
-name: cloudflare-pages-skill
+name: buy-domain-helper
 description: |
-  Buy a domain, deploy a site to Cloudflare Pages, and link the custom domain —
-  full Cloudflare setup from inside your AI agent.
+  3-layer site launcher for any HTML. Tunnel instantly, deploy permanently to Cloudflare Pages, then buy a domain and link it via DNS.
 
   Trigger conditions:
-  - User wants to launch a site or landing page
-  - User wants to buy or register a domain
-  - User wants to connect a custom domain to a Cloudflare Pages project
-  - User says: "buy a domain", "deploy my page", "link my domain", "set up cloudflare"
+  - User wants to share a local HTML file or page publicly
+  - User says: "host my page", "get a public URL", "buy a domain", "launch my site", "link my domain"
+  - User has an index.html or local server they want online
 
-  Prerequisites: Cloudflare account, CF_API_TOKEN
-  Response principle: Ask for confirmation before any purchase. Show the live URL as soon as it's ready.
+  Layer 1 (Tunnel): No account needed — instant tmp URL
+  Layer 2 (Pages): Permanent *.pages.dev URL — needs Cloudflare account
+  Layer 3 (Domain): Custom domain — needs domain purchase + DNS token
+  Response principle: Always start with the lowest layer needed. Ask before going deeper.
   Language: Match the user's language throughout.
 -->
 
-# Cloudflare Pages Skill
+# Buy Domain Helper
 
-> Core tool: `node cf.js <command> --token <token> --account <account-id>`
-> The agent handles the full workflow. The script only calls the Cloudflare API.
+> Core tool: `node site.js <command> [--token ...] [--account ...]`
+> The agent decides which layer to use. The script calls Cloudflare APIs.
 
 ## Install
 
 ```bash
 # Via skills CLI (Claude Code, Cursor, Copilot, and 38+ agents)
-npx skills add wohaoshuai/cloudflare-pages-skill
+npx skills add wohaoshuai/buy-domain-helper
 
 # Via OpenClaw
-clawhub install cloudflare-pages-skill
+clawhub install buy-domain-helper
 ```
 
 ---
 
-## Step 1 — Register & Buy a Domain
+## The 3 Layers
 
-**Ask the user:**
 ```
-What domain name do you want? (e.g. mysite.com, my-app.io)
+┌─────────────────────────────────────────────────────┐
+│  Layer 3 │ Custom Domain    custom.com → Pages       │
+│  Layer 2 │ Pages Hosting    yoursite.pages.dev        │
+│  Layer 1 │ Tunnel           https://abc.trycloudflare.com │
+└─────────────────────────────────────────────────────┘
+       No account ──────────────────► Full setup
 ```
 
-Once they provide a name:
-
-1. Check if it's available:
-   ```bash
-   node cf.js domain-check <domain> --token <token> --account <account-id>
-   ```
-
-2. If **not available**, suggest 2–3 alternatives (e.g. different TLDs: `.io`, `.cc`, `.ai`).
-
-3. If **available**, tell the user the price and ask for confirmation:
-   ```
-   ✅ mysite.com is available for $9.15/year via Cloudflare Registrar.
-
-   To purchase, go to:
-   https://dash.cloudflare.com/<account-id>/domains/register?search=mysite.com
-
-   Complete the purchase in your browser, then come back and I'll finish the setup.
-   ```
-
-4. Wait for the user to confirm they've completed the purchase before proceeding.
-
-> **Note:** Cloudflare Registrar does not expose a purchase API — the user must complete the purchase in the browser. Registration typically takes 1–2 minutes to activate.
+Start at Layer 1 and go deeper only when the user needs it.
 
 ---
 
-## Step 2 — Request DNS Permission
+## Layer 1 — Tunnel (Instant, No Account)
 
-Once the domain is registered (or if the user already owns it), ask:
+Use when the user wants a quick public URL without any setup.
 
+**Ask:** "Do you have a folder with HTML files, or a local server port?"
+
+```bash
+# Static directory
+node site.js tunnel ./my-site
+
+# Local port (e.g. a running dev server)
+node site.js tunnel 3000
 ```
-To link your domain automatically, I need a Cloudflare API token with DNS edit permission.
 
-1. Go to: https://dash.cloudflare.com/profile/api-tokens
-2. Click "Create Token" → "Custom token"
-3. Add permission: Zone → DNS → Edit
-4. Set Zone Resources: <domain>
-5. Create and paste the token here.
-```
+- `cloudflared` installs automatically via Homebrew if not present
+- Prints a `https://*.trycloudflare.com` URL in stderr within seconds
+- **Temporary** — URL dies when the process stops (Ctrl+C)
+- No Cloudflare account required
 
-Store the token as `DNS_TOKEN` for use in Step 3.
-
-Also confirm their **Account ID** (visible at the bottom-right of the Cloudflare dashboard overview page).
+Present the URL immediately. Ask if they want it permanent (→ Layer 2).
 
 ---
 
-## Step 3 — Deploy Example Page & Link Domain
+## Layer 2 — Pages Hosting (Permanent, Free)
 
-### 3a. Get the zone ID
+Use when the user wants a permanent URL that survives restarts.
+
+**Ask for:**
+1. A project name (e.g. `my-site`) — becomes `my-site.pages.dev`
+2. A Cloudflare API token with **Account > Cloudflare Pages > Edit** permission:
+   ```
+   Create at: https://dash.cloudflare.com/profile/api-tokens
+   → Custom token → Account > Cloudflare Pages > Edit
+   ```
+3. Their Account ID (bottom-right of the Cloudflare dashboard overview)
+
 ```bash
-node cf.js zone <domain> --token <DNS_TOKEN>
-# → {"zone_id": "abc123...", "name": "mysite.com", "status": "active"}
+node site.js deploy my-site ./my-site --token <PAGES_TOKEN> --account <ACCOUNT_ID>
+# → {"url":"https://abc123.my-site.pages.dev","subdomain":"my-site.pages.dev"}
 ```
 
-### 3b. Create the Pages project
+Present the live URL. Ask if they want a custom domain (→ Layer 3).
+
+---
+
+## Layer 3 — Custom Domain
+
+### Step 1 — Check & Buy
+
+Check if the domain is available:
 ```bash
-node cf.js pages-create <project-name> --token <PAGES_TOKEN> --account <account-id>
-# → {"name": "mysite", "subdomain": "mysite.pages.dev"}
+node site.js domain-check mysite.com --token <PAGES_TOKEN> --account <ACCOUNT_ID>
+# → {"available": true, "name": "mysite.com"}
 ```
 
-Use the domain name (without TLD) as the project name, e.g. `mysite` for `mysite.com`.
+If available, tell the user the price and send them to buy it:
+```
+✅ mysite.com is available.
 
-### 3c. Build an example page
+Buy it at Cloudflare Registrar (at-cost pricing, no markup):
+https://dash.cloudflare.com/<ACCOUNT_ID>/domains/register?search=mysite.com
 
-Create a minimal `index.html` in `/tmp/<project-name>/`:
-- Use the domain name as the site title
-- Include a brief "coming soon" or placeholder message
-- Keep it clean and dark-themed
-
-### 3d. Deploy the page
-```bash
-node cf.js pages-deploy <project-name> /tmp/<project-name> --token <PAGES_TOKEN> --account <account-id>
-# → {"url": "https://abc123.mysite.pages.dev", "project": "mysite"}
+Come back once the purchase is complete — I'll link it automatically.
 ```
 
-### 3e. Attach the custom domain
-```bash
-node cf.js pages-domain <project-name> <domain> --token <PAGES_TOKEN> --account <account-id>
-# → {"domain": "mysite.com", "status": "initializing"}
+> Cloudflare Registrar has no purchase API. The user must buy in the browser.
+> Wait for their confirmation before proceeding.
+
+### Step 2 — Request DNS Token
+
+```
+To configure DNS automatically, I need a token with DNS edit permission:
+
+1. https://dash.cloudflare.com/profile/api-tokens
+2. Create Token → Custom token
+3. Permission: Zone → DNS → Edit
+4. Zone Resources: mysite.com
+5. Paste the token here.
 ```
 
-### 3f. Add the CNAME record
+### Step 3 — Link Domain to Pages
+
 ```bash
-node cf.js dns-cname <zone-id> @ <project-name>.pages.dev --token <DNS_TOKEN>
-# → {"name": "mysite.com", "content": "mysite.pages.dev", "proxied": true}
+# Get zone ID
+node site.js zone mysite.com --token <DNS_TOKEN>
+# → {"zone_id":"abc123","name":"mysite.com","status":"active"}
+
+# Attach domain to Pages project
+node site.js pages-domain my-site mysite.com --token <PAGES_TOKEN> --account <ACCOUNT_ID>
+# → {"domain":"mysite.com","status":"initializing"}
+
+# Add CNAME record
+node site.js dns-link <zone_id> my-site --token <DNS_TOKEN>
+# → {"name":"mysite.com","content":"my-site.pages.dev","proxied":true}
 ```
 
-### 3g. Verify it's live
+### Step 4 — Verify
+
 ```bash
-curl -sI https://<domain> | head -2
+curl -sI https://mysite.com | head -2
 # HTTP/2 200 ✅
 ```
 
----
+If you get `522`: SSL cert is provisioning — wait 30s and retry.
 
-## Step 4 — Present Results
+### Present result
 
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━
-☁️  Your site is live!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 Your site is live!
 
-🌐 https://<domain>
-📁 Pages project: <project-name>.pages.dev
-━━━━━━━━━━━━━━━━━━━━━━━━
-Next steps:
-- Replace /tmp/<project-name>/index.html with your real content
-- Run: node cf.js pages-deploy <project-name> <dir> --token ...
-- Your domain will automatically serve the updated page
+  https://mysite.com
+
+Powered by Cloudflare Pages.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+To update the site, run:
+  node site.js deploy my-site <dir> --token ...
 ```
 
 ---
 
 ## Error Handling
 
-| Situation | Response |
-|-----------|----------|
-| Domain not in account yet | Ask user to complete purchase in browser and confirm |
-| `zone_id: null` | Domain not yet active — wait 1–2 min and retry `cf.js zone` |
-| DNS token auth error | Ask user to regenerate token with correct Zone > DNS > Edit permission |
-| Pages project name taken | Append `-site` or `-app` to the project name |
-| `HTTP 522` after deploy | SSL cert still provisioning — wait 30s and retry |
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `zone_id: null` | Domain not active yet | Wait 1–2 min, retry `site.js zone` |
+| `HTTP 522` | SSL provisioning | Wait 30s, retry curl |
+| `already exists` on deploy | Project exists | Skip creation, continue deploy |
+| DNS auth error | Wrong token scope | Ask user to create token with Zone > DNS > Edit |
+| `domain-check` error | Unsupported TLD | Suggest `.com`, `.net`, `.org`, `.io`, `.cc`, `.ai` |
 
 ---
 
 ## Token Reference
 
-| Token type | Permission | Where to create |
-|-----------|-----------|----------------|
-| Pages token | Account > Cloudflare Pages > Edit | dash.cloudflare.com/profile/api-tokens |
-| DNS token | Zone > DNS > Edit (specific zone) | dash.cloudflare.com/profile/api-tokens |
+| Token | Permission | Used for |
+|-------|-----------|----------|
+| Pages token | Account > Cloudflare Pages > Edit | `deploy`, `pages-domain` |
+| DNS token | Zone > DNS > Edit (specific zone) | `zone`, `dns-link` |
 
-The wrangler OAuth token (`wrangler login`) covers Pages but **not** DNS edit. Always ask for a separate custom DNS token.
+> The wrangler OAuth token (`wrangler login`) covers Pages deploys but **never** DNS edit.
+> Always request a separate custom DNS token for Layer 3.
